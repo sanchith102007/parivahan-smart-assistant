@@ -50,7 +50,6 @@ RULE_PACKS = {
 
 # --- HEADER & BANNER ---
 st.title("🚗 Vahan Chalak Seva")
-st.caption("Challenge 09: Resolving cross-jurisdiction dependencies, pending requests, and safe deadlines.")
 st.info("ℹ️ System Status: Simulating Parivahan portal rules. Sensitive data is masked by default.")
 
 # --- STATE INITIALIZATION (BEFORE SIDEBAR WIDGETS) ---

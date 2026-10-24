@@ -12,7 +12,6 @@ st.set_page_config(
 # --- GEMINI API CONFIGURATION (SAFE SETUP) ---
 api_key = os.getenv("GEMINI_API_KEY", "")
 
-# Safely check Streamlit secrets without crashing if secrets.toml is absent
 try:
     if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
         api_key = st.secrets["GEMINI_API_KEY"]
@@ -54,9 +53,7 @@ st.title("🚗 Parivahan & Sarathi Smart Service Navigator")
 st.caption("Challenge 09: Resolving cross-jurisdiction dependencies, pending requests, and safe deadlines.")
 st.info("ℹ️ System Status: Simulating Parivahan portal rules. Sensitive data is masked by default.")
 
-# --- SIDEBAR: INPUT & SCENARIO SELECTION ---
-with st.sidebar:
-    # --- INITIALIZE STATE DEFAULTS ---
+# --- STATE INITIALIZATION (BEFORE SIDEBAR WIDGETS) ---
 if "from_state" not in st.session_state:
     st.session_state["from_state"] = "Telangana (TG)"
 if "to_state" not in st.session_state:
@@ -74,7 +71,6 @@ if "has_pending" not in st.session_state:
 with st.sidebar:
     st.header("📋 Case Details")
     
-    # Quick Preset Button for the Live Demo
     if st.button("⚡ Reset to Ravi's Scenario"):
         st.session_state["from_state"] = "Telangana (TG)"
         st.session_state["to_state"] = "Andhra Pradesh (AP)"
@@ -95,7 +91,6 @@ with st.sidebar:
         key="to_state"
     )
     
-    # Note: Do not pass both `value` and `key` to avoid widget conflict
     days_to_expiry = st.slider("Days Until Licence Expiry", 1, 60, key="days_to_expiry")
     has_challan = st.checkbox("Unpaid Traffic Challan?", key="has_challan")
     challan_amount = st.number_input("Challan Amount (₹)", key="challan_amount")
@@ -105,7 +100,7 @@ with st.sidebar:
     st.subheader("⚠️ Live Demo Stress Tests")
     simulate_rejection = st.toggle("Simulate: Pending Request REJECTED mid-flow")
     slot_scarcity = st.toggle("Simulate: RTO Appointment Collapse (High Wait)")
-    
+
 # --- 1. JURISDICTION RULE RESOLUTION & FALLBACK ---
 if to_state not in RULE_PACKS:
     st.error(f"⚠️ Rule Pack Missing: Official rules for '{to_state}' are not available in the current database.")
@@ -124,7 +119,6 @@ expiry_date = today + timedelta(days=days_to_expiry)
 latest_safe_date = expiry_date - timedelta(days=total_lead_time)
 days_remaining_to_act = (latest_safe_date - today).days
 
-# Fee calculation
 total_fees = rules["renewal_fee"] + rules["address_change_fee"] + (challan_amount if has_challan else 0)
 
 # --- 3. DASHBOARD METRICS ---
@@ -163,7 +157,6 @@ dot_code += """
     Renewal [label="Licence Renewal &\\nSlot Booking", fillcolor="#dae8fc", color="#6c8ebf"];
 """
 
-# Establish edges based on active conditions
 if has_challan and has_pending:
     dot_code += '    Challan -> Pending [label="Blocks"];\n'
     if simulate_rejection:
@@ -211,7 +204,7 @@ st.subheader("🤖 Citizen Assistant (Plain-English Explainer)")
 
 if st.button("Generate Plain-English & Vernacular Guidance"):
     if not client:
-        st.warning("No Gemini API key detected (or google-genai package missing). Showing local rule summary:")
+        st.warning("No Gemini API key detected. Showing local rule summary:")
         st.info(
             "📌 **Citizen Notice:**\n"
             "1. Pay all outstanding challans immediately.\n"

@@ -25,7 +25,7 @@ if api_key:
     except Exception:
         pass
 
-# --- 4 & 5. JURISDICTION RULE PACKS (VERSIONED & SOURCED) ---
+# --- JURISDICTION RULE PACKS (VERSIONED & SOURCED) ---
 RULE_PACKS = {
     "Andhra Pradesh (AP)": {
         "version": "AP-RTO-2026.2",
@@ -34,10 +34,10 @@ RULE_PACKS = {
         "transfer_fee": 500,
         "slot_wait_days": 7,
         "task_durations": {
-            "challan": 1,        # Instant online sync
-            "pending_req": 5,    # NOC / Transfer clearance
-            "address_change": 4, # Document verification
-            "renewal": 2         # Biometrics & slot dispatch
+            "challan": 1,
+            "pending_req": 5,
+            "address_change": 4,
+            "renewal": 2
         },
         "late_fee_per_month": 500,
         "official_url": "https://aptransport.org",
@@ -61,99 +61,137 @@ RULE_PACKS = {
     }
 }
 
-# --- HEADER & CONSTRAINTS BANNER ---
+# --- HEADER & BANNER ---
 st.title("🚗 Vahan Chalak Seva")
 st.caption("Challenge 09: Cross-Jurisdiction Dependency Engine, Safe-Date Calculator & Exception Handler")
 st.info("🔒 **Data Privacy & Simulation Notice:** Identifiers are masked by default. Portal data is simulated. Official rule sources and estimate freshness labels are displayed for compliance.")
 
-# --- 6. SCENARIO SWITCHER (PRE-LOADED EVALUATION TESTS) ---
+# --- SCENARIO PRESET CALLBACK FUNCTION ---
+def apply_scenario_preset():
+    choice = st.session_state.get("scenario_choice")
+    if choice == "Scenario 1: Ravi's Full Dilemma (Pending + Challan + 21 Days)":
+        st.session_state["from_state"] = "Telangana (TG)"
+        st.session_state["to_state"] = "Andhra Pradesh (AP)"
+        st.session_state["days_to_expiry"] = 21
+        st.session_state["has_challan"] = True
+        st.session_state["challan_amount"] = 1000
+        st.session_state["has_pending"] = True
+        st.session_state["simulate_rejection"] = False
+        st.session_state["slot_scarcity"] = False
+        st.session_state["address_invalidated"] = False
+    elif choice == "Scenario 2: Normal Clean Cross-State Transfer":
+        st.session_state["from_state"] = "Telangana (TG)"
+        st.session_state["to_state"] = "Andhra Pradesh (AP)"
+        st.session_state["days_to_expiry"] = 40
+        st.session_state["has_challan"] = False
+        st.session_state["challan_amount"] = 0
+        st.session_state["has_pending"] = False
+        st.session_state["simulate_rejection"] = False
+        st.session_state["slot_scarcity"] = False
+        st.session_state["address_invalidated"] = False
+    elif choice == "Scenario 3: Mid-Demo Rejection Exception":
+        st.session_state["from_state"] = "Telangana (TG)"
+        st.session_state["to_state"] = "Andhra Pradesh (AP)"
+        st.session_state["days_to_expiry"] = 21
+        st.session_state["has_challan"] = True
+        st.session_state["challan_amount"] = 1000
+        st.session_state["has_pending"] = True
+        st.session_state["simulate_rejection"] = True
+        st.session_state["slot_scarcity"] = False
+        st.session_state["address_invalidated"] = False
+    elif choice == "Scenario 4: Synthetic Appointment Collapse (Slot Scarcity)":
+        st.session_state["from_state"] = "Telangana (TG)"
+        st.session_state["to_state"] = "Andhra Pradesh (AP)"
+        st.session_state["days_to_expiry"] = 21
+        st.session_state["has_challan"] = False
+        st.session_state["challan_amount"] = 0
+        st.session_state["has_pending"] = False
+        st.session_state["simulate_rejection"] = False
+        st.session_state["slot_scarcity"] = True
+        st.session_state["address_invalidated"] = False
+    elif choice == "Scenario 5: Unknown Jurisdiction (Degraded Fallback)":
+        st.session_state["from_state"] = "Telangana (TG)"
+        st.session_state["to_state"] = "Karnataka (KA) [No Rule Pack]"
+        st.session_state["days_to_expiry"] = 30
+        st.session_state["has_challan"] = False
+        st.session_state["challan_amount"] = 0
+        st.session_state["has_pending"] = False
+        st.session_state["simulate_rejection"] = False
+        st.session_state["slot_scarcity"] = False
+        st.session_state["address_invalidated"] = False
+
+# --- STATE INITIALIZATION ---
+initial_defaults = {
+    "scenario_choice": "Scenario 1: Ravi's Full Dilemma (Pending + Challan + 21 Days)",
+    "from_state": "Telangana (TG)",
+    "to_state": "Andhra Pradesh (AP)",
+    "days_to_expiry": 21,
+    "has_challan": True,
+    "challan_amount": 1000,
+    "has_pending": True,
+    "simulate_rejection": False,
+    "slot_scarcity": False,
+    "address_invalidated": False
+}
+
+for key, default_val in initial_defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_val
+
+# --- SIDEBAR: INPUT & SCENARIO SELECTION ---
 with st.sidebar:
     st.header("🧪 Test Scenarios")
-    scenario_choice = st.selectbox(
+    st.selectbox(
         "Select Test Scenario",
         [
-            "Custom Setup",
             "Scenario 1: Ravi's Full Dilemma (Pending + Challan + 21 Days)",
             "Scenario 2: Normal Clean Cross-State Transfer",
             "Scenario 3: Mid-Demo Rejection Exception",
             "Scenario 4: Synthetic Appointment Collapse (Slot Scarcity)",
-            "Scenario 5: Unknown Jurisdiction (Degraded Fallback)"
-        ]
+            "Scenario 5: Unknown Jurisdiction (Degraded Fallback)",
+            "Custom Setup"
+        ],
+        key="scenario_choice",
+        on_change=apply_scenario_preset
     )
-
-    # Preset application logic
-    if scenario_choice == "Scenario 1: Ravi's Full Dilemma (Pending + Challan + 21 Days)":
-        from_st = "Telangana (TG)"
-        to_st = "Andhra Pradesh (AP)"
-        d_exp = 21
-        challan_active = True
-        c_amt = 1000
-        pending_active = True
-        rej_active = False
-        collapse_active = False
-    elif scenario_choice == "Scenario 2: Normal Clean Cross-State Transfer":
-        from_st = "Telangana (TG)"
-        to_st = "Andhra Pradesh (AP)"
-        d_exp = 40
-        challan_active = False
-        c_amt = 0
-        pending_active = False
-        rej_active = False
-        collapse_active = False
-    elif scenario_choice == "Scenario 3: Mid-Demo Rejection Exception":
-        from_st = "Telangana (TG)"
-        to_st = "Andhra Pradesh (AP)"
-        d_exp = 21
-        challan_active = True
-        c_amt = 1000
-        pending_active = True
-        rej_active = True
-        collapse_active = False
-    elif scenario_choice == "Scenario 4: Synthetic Appointment Collapse (Slot Scarcity)":
-        from_st = "Telangana (TG)"
-        to_st = "Andhra Pradesh (AP)"
-        d_exp = 21
-        challan_active = False
-        c_amt = 0
-        pending_active = False
-        rej_active = False
-        collapse_active = True
-    elif scenario_choice == "Scenario 5: Unknown Jurisdiction (Degraded Fallback)":
-        from_st = "Telangana (TG)"
-        to_st = "Karnataka (KA) [No Rule Pack]"
-        d_exp = 30
-        challan_active = False
-        c_amt = 0
-        pending_active = False
-        rej_active = False
-        collapse_active = False
-    else:
-        from_st = "Telangana (TG)"
-        to_st = "Andhra Pradesh (AP)"
-        d_exp = 21
-        challan_active = True
-        c_amt = 1000
-        pending_active = True
-        rej_active = False
-        collapse_active = False
 
     st.markdown("---")
     st.header("📋 Case Parameters")
-    from_state = st.selectbox("Source Jurisdiction", ["Telangana (TG)", "Andhra Pradesh (AP)"], index=0 if from_st == "Telangana (TG)" else 1)
-    to_state = st.selectbox("Target Jurisdiction", ["Andhra Pradesh (AP)", "Telangana (TG)", "Karnataka (KA) [No Rule Pack]"], index=2 if "Karnataka" in to_st else (0 if to_st == "Andhra Pradesh (AP)" else 1))
+    
+    st.selectbox(
+        "Source Jurisdiction",
+        ["Telangana (TG)", "Andhra Pradesh (AP)"],
+        key="from_state"
+    )
+    st.selectbox(
+        "Target Jurisdiction",
+        ["Andhra Pradesh (AP)", "Telangana (TG)", "Karnataka (KA) [No Rule Pack]"],
+        key="to_state"
+    )
 
-    days_to_expiry = st.slider("Days Until DL Expiry", 1, 90, d_exp)
-    has_challan = st.checkbox("Unpaid Penalty Item (Challan)", value=challan_active)
-    challan_amount = st.number_input("Challan Amount (₹)", value=c_amt if has_challan else 0)
-    has_pending = st.checkbox("Pending Ownership Request Active", value=pending_active)
+    st.slider("Days Until DL Expiry", 1, 90, key="days_to_expiry")
+    st.checkbox("Unpaid Penalty Item (Challan)", key="has_challan")
+    st.number_input("Challan Amount (₹)", key="challan_amount")
+    st.checkbox("Pending Ownership Request Active", key="has_pending")
 
     st.markdown("---")
     st.subheader("⚡ Live Circumstance Triggers")
-    simulate_rejection = st.toggle("Ownership Request REJECTED", value=rej_active)
-    slot_scarcity = st.toggle("Appointment Availability Collapsed", value=collapse_active)
-    address_invalidated = st.toggle("Address Proof Invalidated by Cross-Update", value=False)
+    st.toggle("Ownership Request REJECTED", key="simulate_rejection")
+    st.toggle("Appointment Availability Collapsed", key="slot_scarcity")
+    st.toggle("Address Proof Invalidated by Cross-Update", key="address_invalidated")
 
-# --- 4. UNKNOWN JURISDICTION FALLBACK ---
+# Pull active variables from session state
+from_state = st.session_state["from_state"]
+to_state = st.session_state["to_state"]
+days_to_expiry = st.session_state["days_to_expiry"]
+has_challan = st.session_state["has_challan"]
+challan_amount = st.session_state["challan_amount"]
+has_pending = st.session_state["has_pending"]
+simulate_rejection = st.session_state["simulate_rejection"]
+slot_scarcity = st.session_state["slot_scarcity"]
+address_invalidated = st.session_state["address_invalidated"]
+
+# --- UNKNOWN JURISDICTION FALLBACK ---
 if to_state not in RULE_PACKS:
     st.error(f"🛑 **Jurisdiction Unknown:** No verified rule pack found for '{to_state}'.")
     st.warning("⚠️ **Degraded Execution Mode Activated:** To avoid guessing statutory fees or deadlines, automated scheduling is suspended.")
@@ -168,14 +206,12 @@ if to_state not in RULE_PACKS:
 
 rules = RULE_PACKS[to_state]
 
-# --- 2 & 3. DYNAMIC RECALCULATION & TASK-BY-TASK SAFE DATES ---
+# --- DYNAMIC RECALCULATION & TASK-BY-TASK SAFE DATES ---
 today = datetime.now()
 expiry_date = today + timedelta(days=days_to_expiry)
 
-# Determine slot waiting time
 appointment_wait = 24 if slot_scarcity else rules["slot_wait_days"]
 
-# Define tasks with dynamic durations based on active conditions
 tasks = []
 if has_challan:
     tasks.append({
@@ -225,7 +261,6 @@ tasks.append({
     "type": "Final Goal"
 })
 
-# Backward deadline scheduling from Expiry Date
 current_deadline = expiry_date
 scheduled_tasks = []
 
@@ -239,19 +274,15 @@ for t in reversed(tasks):
         "days_left": days_left_for_task,
         "deadline_for_next": current_deadline
     })
-    # The next task backward must finish before this one begins
     current_deadline = task_latest_safe
-# Restore forward chronological order
+
 scheduled_tasks.reverse()
 
-# Overall safe deadline is the safe date of the very first prerequisite task
 first_task_safe_date = scheduled_tasks[0]["latest_safe_date"]
 days_to_first_deadline = (first_task_safe_date - today).days
-
-# Total estimated fees
 total_statutory_fees = sum(t["cost"] for t in scheduled_tasks)
 
-# --- 3. DASHBOARD METRICS ---
+# --- DASHBOARD METRICS ---
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Target Jurisdiction", to_state, help=f"Rule Pack: {rules['version']}")
 col2.metric("DL Expiry Date", expiry_date.strftime("%d %b %Y"))
@@ -267,7 +298,7 @@ col4.metric(
     help=f"Includes challans + RTO fees. Official verified date: {rules['last_checked']}"
 )
 
-# --- 5. SOURCE AND FRESHNESS LABELS BANNER ---
+# --- SOURCE AND FRESHNESS LABELS ---
 st.caption(
     f"📋 **Rule Pack Metadata:** Verified Version: `{rules['version']}` | "
     f"Official Portal: [{rules['official_url']}]({rules['official_url']}) | "
@@ -275,7 +306,7 @@ st.caption(
     f"Slot Buffer: `{appointment_wait} days`"
 )
 
-# --- 1. DEPENDENCY ENGINE & GRAPHVIZ VISUALIZATION ---
+# --- DEPENDENCY GRAPH ---
 st.markdown("---")
 st.subheader("🔄 Dynamic Dependency Flowchart")
 
@@ -285,7 +316,6 @@ digraph G {
     node [shape=box, style="filled,rounded", fontname="Arial", margin=0.2];
 """
 
-# Dynamic node styling based on state triggers
 if has_challan:
     dot_code += f'    challan [label="1. Pay Traffic Challan\\n(₹{challan_amount})\\n[Deadline: {scheduled_tasks[0]["latest_safe_date"].strftime("%d %b")}]", fillcolor="#ffcccc", color="#cc0000"];\n'
 
@@ -300,7 +330,6 @@ dot_code += f"""
     renewal [label="4. Biometric Slot &\\nDL Renewal", fillcolor="#dae8fc", color="#1565c0"];
 """
 
-# Build directed edges explaining the block reasons
 if has_challan and has_pending:
     target_pending = "pending_reject" if simulate_rejection else "pending"
     dot_code += f'    challan -> {target_pending} [label="Locks registry"];\n'
@@ -315,7 +344,7 @@ dot_code += '    address -> renewal [label="Validates local residency"];\n}'
 
 st.graphviz_chart(dot_code)
 
-# --- 2. PER-TASK SAFE DATE SCHEDULE ---
+# --- PER-TASK SCHEDULE ---
 st.markdown("---")
 st.subheader("📅 Task-by-Task Safe Deadline Schedule")
 st.write("Each task is scheduled backward from the expiry date to guarantee your renewal completes before statutory grace periods expire.")
@@ -331,7 +360,6 @@ for idx, (c, t) in enumerate(zip(task_cols, scheduled_tasks), start=1):
         st.markdown(f"*Days Left to Act:* `{t['days_left']} day(s)`")
         st.info(f"**Why blocked here:** {t['reason']}")
 
-# Late-fee warning callout
 if days_to_first_deadline < 0:
     late_fee_est = rules["late_fee_per_month"]
     st.error(
@@ -339,7 +367,7 @@ if days_to_first_deadline < 0:
         f"Anticipated statutory penalty under {to_state} rules: **₹{late_fee_est} per month delayed**."
     )
 
-# --- 6. AI PLAIN-LANGUAGE EXPLAINER ---
+# --- AI PLAIN-LANGUAGE EXPLAINER ---
 st.markdown("---")
 st.subheader("🤖 Citizen Assistant (Plain-English & Vernacular Guidance)")
 

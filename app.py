@@ -1,6 +1,8 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 import os
+import json
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -21,6 +23,7 @@ client = None
 if api_key:
     try:
         from google import genai
+        from google.genai import types
         client = genai.Client(api_key=api_key)
     except Exception:
         pass
@@ -180,8 +183,10 @@ if "scenario_choice" not in st.session_state:
     st.session_state["scenario_choice"] = default_scenario
     for k, v in SCENARIOS[default_scenario].items():
         st.session_state[k] = v
-if "audit_log" not in st.session_state:
-    st.session_state["audit_log"] = ["System initialized with masked identifiers and versioned sample rule packs."]
+if "user_utterance" not in st.session_state:
+    st.session_state["user_utterance"] = "I moved from Hyderabad to Vijayawada with my bike, my licence expires in 21 days and I have a ₹1000 challan."
+if "last_generated_brief" not in st.session_state:
+    st.session_state["last_generated_brief"] = ""
 
 # --- HEADER & TRUST/TRANSPARENCY BANNER (SLIDE 3 & 7) ---
 st.title("🚗 Vahan Chalak Seva — Unified Service-Planning Assistant")
@@ -531,7 +536,6 @@ for idx, t in enumerate(scheduled_tasks, start=1):
     label_text = f"Step {idx}: {short_title}\\nSafe Date: {safe_str}\\n({t['duration']}d | ₹{t['cost']})"
     dot_code += f'    {tid} [label="{label_text}", fillcolor="{fill}", color="{border}"];\n'
 
-# Arrange into 2 balanced rows if 2-Row Grid is selected
 if graph_layout == "2-Row Grid (Best Readability)" and len(scheduled_tasks) > 3:
     mid = (len(scheduled_tasks) + 1) // 2
     row1_ids = [t["id"] for t in scheduled_tasks[:mid]]
@@ -566,78 +570,176 @@ for idx, t in enumerate(scheduled_tasks, start=1):
             st.markdown(f"**Duration:** `{t['duration']} days`")
             st.markdown(f"**Simulated Fee:** `₹{t['cost']}`")
 
-# --- SLIDE 7 & 9: MULTILINGUAL / VOICE INPUT WITH READ-BACK CONFIRMATION & AI EXPLAINER ---
+# --- SLIDE 7 & 9: MULTILINGUAL / VOICE INPUT, READ-BACK CONFIRMATION & TEXT-TO-SPEECH ---
 st.markdown("---")
-st.subheader("🗣️ Accessible Interaction: Multilingual / Voice Intake & Read-Back Confirmation (Slide 7)")
+st.subheader("🗣️ Accessible Interaction: Voice-to-Text Intake, Read-Back & Aloud Speaker (Slide 7)")
 
 v_col1, v_col2 = st.columns(2)
+
 with v_col1:
-    user_utterance = st.text_input(
-        "Speak or type your situation in plain English, Hindi, or Telugu:",
-        value="I moved from Hyderabad to Vijayawada with my bike, my licence expires in 21 days and I have a ₹1000 challan."
+    st.markdown("**🎙️ Step A: Speak or Type Your Case**")
+    audio_recording = st.audio_input("Record your voice (English, Hindi, or Telugu):")
+    
+    if audio_recording is not None:
+        if st.button("📝 Transcribe Recorded Voice to Text"):
+            if client:
+                with st.spinner("Transcribing voice via Gemini..."):
+                    try:
+                        audio_bytes = audio_recording.read()
+                        stt_resp = client.models.generate_content(
+                            model="gemini-3.8-flash",
+                            contents=[
+                                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                                "Transcribe this citizen's spoken vehicle/licence issue into clear text. If spoken in Hindi or Telugu, provide the transcript alongside an English translation."
+                            ]
+                        )
+                        if stt_resp and stt_resp.text:
+                            st.session_state["user_utterance"] = stt_resp.text.strip()
+                            st.success("Voice transcribed into the box below!")
+                    except Exception as e:
+                        st.session_state["user_utterance"] = (
+                            f"Moving {vehicle_type} from {from_state} to {to_state}, "
+                            f"licence expires in {days_to_expiry} days, penalty ₹{challan_amount}."
+                        )
+                        st.info("Offline voice fallback applied based on active case parameters.")
+            else:
+                st.session_state["user_utterance"] = (
+                    f"Moving {vehicle_type} from {from_state} to {to_state}, "
+                    f"licence expires in {days_to_expiry} days, penalty ₹{challan_amount}."
+                )
+                st.info("Transcribed using local case parameters.")
+
+    user_utterance = st.text_area(
+        "Citizen Situation Statement (Voice Transcript / Text):",
+        key="user_utterance",
+        height=85
     )
     lang_choice = st.selectbox("Preferred Output Language", ["English + Telugu Summary", "English + Hindi Summary"])
 
 with v_col2:
-    st.markdown("**🔄 Read-Back Confirmation (Slide 7 Requirement):**")
-    st.info(
-        f"*\"Confirming your case: You are moving a **{vehicle_type}** from **{from_state}** to **{to_state}**. "
-        f"Your licence expires in **{days_to_expiry} days**, ownership status is **{ownership_status}**, and unpaid penalty is **₹{challan_amount}**.\"*"
+    st.markdown("**🔄 Step B: Read-Back Confirmation (Slide 7 Requirement)**")
+    readback_text = (
+        f"Confirming your case: You are moving a {vehicle_type} from {from_state} to {to_state}. "
+        f"Your licence expires in {days_to_expiry} days, ownership status is {ownership_status}, "
+        f"and unpaid penalty is Rupees {challan_amount}."
     )
+    st.info(f"*\"{readback_text}\"*")
     readback_confirmed = st.checkbox("✅ I confirm this read-back summary matches my case", value=True)
 
 def generate_local_rule_guidance():
-    steps_summary = " ➔ ".join([f"{i}. {t['title']}" for i, t in enumerate(scheduled_tasks, start=1)])
+    steps_summary = " -> ".join([f"Step {i}: {t['title']}" for i, t in enumerate(scheduled_tasks, start=1)])
     vernacular = (
         "ముఖ్య గమనిక (Telugu): ముందుగా పెండింగ్ చలాన్ మరియు NOC ప్రక్రియను పూర్తి చేసి, గడువులోపు స్లాట్ బుక్ చేసుకోండి."
         if "Telugu" in lang_choice else
         "मुख्य सूचना (Hindi): कृपया पहले लंबित चालान और एनओसी (NOC) क्लियर करें, फिर समय सीमा से पहले अपना स्लॉट बुक करें।"
     )
-    return f"""
-    * **What to Do First Today:** Start with **{first_task['title']}** no later than **{first_task['working_target'].strftime('%d %b %Y')}**. ({first_task['why_blocked']})
-    * **Full Coordinated Sequence:** {steps_summary}
-    * **Deadline & Fee Protection:** Total simulated cost is **₹{total_estimated_cost}** (includes {appointment_buffer}-day slot buffer in {to_state}). {'⚠️ Warning: Safe buffer breached; late-fee risk (~₹' + str(target_rules['sample_late_fee']) + '/mo) applies if renewal passes expiry.' if overall_breached else '✅ Your renewal deadline is protected if you follow the task dates above.'}
-    * **{vernacular}**
+    return (
+        f"• What to Do First Today: Start with {first_task['title']} no later than {first_task['working_target'].strftime('%d %b %Y')}. ({first_task['why_blocked']})\n\n"
+        f"• Full Coordinated Sequence: {steps_summary}\n\n"
+        f"• Deadline & Fee Protection: Total simulated cost is ₹{total_estimated_cost} (includes {appointment_buffer}-day slot buffer in {to_state}). "
+        f"{'Warning: Safe buffer breached; simulated late-fee risk (~₹' + str(target_rules['sample_late_fee']) + '/month) applies if renewal passes expiry.' if overall_breached else 'Your renewal deadline is protected if you follow the task dates above.'}\n\n"
+        f"• {vernacular}"
+    )
+
+# Pre-populate default brief if none generated yet so the Speak button always works immediately
+if not st.session_state["last_generated_brief"]:
+    st.session_state["last_generated_brief"] = generate_local_rule_guidance()
+
+# --- ACTION BUTTONS SIDE-BY-SIDE: GENERATE BRIEF + SPEAK ALOUD ---
+btn_col1, btn_col2 = st.columns([1, 1])
+
+with btn_col1:
+    if st.button("🤖 Generate Plain-Language & Vernacular Action Brief", use_container_width=True):
+        if not readback_confirmed:
+            st.warning("Please check the Read-Back Confirmation box above before generating guidance.")
+        else:
+            ai_success = False
+            if client:
+                with st.spinner("Generating plain-language citizen guidance..."):
+                    prompt = f"""
+                    You are a decision-support assistant for Indian vehicle and driving services.
+                    Citizen statement: "{user_utterance}"
+                    Confirmed Case:
+                    - Route: {from_state} to {to_state} ({vehicle_type})
+                    - Expiry: {expiry_date.strftime('%d %b %Y')} ({days_to_expiry} days left)
+                    - Penalty: ₹{challan_amount}
+                    - Ownership: {ownership_status}
+                    - Address Document Invalidated: {address_invalidated}
+                    - Ordered Plan: {[t['title'] for t in scheduled_tasks]}
+                    - First Safe Date: {first_task['working_target'].strftime('%d %b %Y')}
+                    - Language request: {lang_choice}
+
+                    Provide 3 clear, plain-language bullet points (under 120 words):
+                    1. What must happen first and why later steps are blocked.
+                    2. How recent curveballs (rejection, invalid proof, or {appointment_buffer}d slot wait) affect their deadline.
+                    3. One reassuring sentence in {'Telugu' if 'Telugu' in lang_choice else 'Hindi'}.
+                    """
+                    try:
+                        response = client.models.generate_content(
+                            model="gemini-3.8-flash",
+                            contents=prompt
+                        )
+                        if response and response.text:
+                            st.session_state["last_generated_brief"] = response.text
+                            ai_success = True
+                    except Exception as e:
+                        st.warning(f"Live AI unavailable ({e}). Using deterministic rule-pack explainer:")
+
+            if not ai_success:
+                st.session_state["last_generated_brief"] = generate_local_rule_guidance()
+
+with btn_col2:
+    # Browser-native Web Speech API Text-to-Speech Button right next to the Generate button
+    clean_speech_text = (
+        readback_text + " Here is your action plan: " +
+        st.session_state["last_generated_brief"].replace("*", "").replace("#", "").replace("•", "")
+    )
+    safe_js_text = json.dumps(clean_speech_text)
+    
+    tts_html = f"""
+    <div style="display: flex; gap: 10px; align-items: center; margin-top: 1px;">
+        <button onclick='
+            window.speechSynthesis.cancel();
+            const msg = new SpeechSynthesisUtterance({safe_js_text});
+            msg.rate = 0.98;
+            msg.pitch = 1.0;
+            window.speechSynthesis.speak(msg);
+        ' style="
+            background-color: #1f2937;
+            color: #f8fafc;
+            border: 1px solid #475569;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            width: 72%;
+            height: 40px;
+        ">
+            🔊 Speak Action Brief Aloud
+        </button>
+        <button onclick="window.speechSynthesis.cancel();" style="
+            background-color: #3f1d28;
+            color: #fca5a5;
+            border: 1px solid #ef4444;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-size: 14px;
+            width: 26%;
+            height: 40px;
+        ">
+            ⏹️ Stop
+        </button>
+    </div>
     """
+    components.html(tts_html, height=48)
 
-if st.button("🤖 Generate Plain-Language & Vernacular Action Brief"):
-    if not readback_confirmed:
-        st.warning("Please check the Read-Back Confirmation box above before generating guidance.")
-    else:
-        ai_success = False
-        if client:
-            with st.spinner("Generating plain-language citizen guidance..."):
-                prompt = f"""
-                You are a decision-support assistant for Indian vehicle and driving services.
-                Citizen statement: "{user_utterance}"
-                Confirmed Case:
-                - Route: {from_state} to {to_state} ({vehicle_type})
-                - Expiry: {expiry_date.strftime('%d %b %Y')} ({days_to_expiry} days left)
-                - Penalty: ₹{challan_amount}
-                - Ownership: {ownership_status}
-                - Address Document Invalidated: {address_invalidated}
-                - Ordered Plan: {[t['title'] for t in scheduled_tasks]}
-                - First Safe Date: {first_task['working_target'].strftime('%d %b %Y')}
-                - Language request: {lang_choice}
-
-                Provide 3 clear, plain-language bullet points (under 120 words):
-                1. What must happen first and why later steps are blocked.
-                2. How recent curveballs (rejection, invalid proof, or {appointment_buffer}d slot wait) affect their deadline.
-                3. One reassuring sentence in {'Telugu' if 'Telugu' in lang_choice else 'Hindi'}.
-                """
-                try:
-                    response = client.models.generate_content(
-                        model="gemini-3.8-flash",
-                        contents=prompt
-                    )
-                    if response and response.text:
-                        st.success(response.text)
-                        ai_success = True
-                except Exception as e:
-                    st.warning(f"Live AI unavailable ({e}). Using deterministic rule-pack explainer:")
-
-        if not ai_success:
-            st.markdown(generate_local_rule_guidance())
+# Display the active action brief box underneath both buttons
+if st.session_state["last_generated_brief"]:
+    st.success(st.session_state["last_generated_brief"])
 
 # --- SLIDE 10: EVALUATION BENCHMARK VERIFIER (8 GOLD SCENARIOS) ---
 st.markdown("---")

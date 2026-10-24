@@ -56,16 +56,33 @@ st.info("ℹ️ System Status: Simulating Parivahan portal rules. Sensitive data
 
 # --- SIDEBAR: INPUT & SCENARIO SELECTION ---
 with st.sidebar:
+    # --- INITIALIZE STATE DEFAULTS ---
+if "from_state" not in st.session_state:
+    st.session_state["from_state"] = "Telangana (TG)"
+if "to_state" not in st.session_state:
+    st.session_state["to_state"] = "Andhra Pradesh (AP)"
+if "days_to_expiry" not in st.session_state:
+    st.session_state["days_to_expiry"] = 21
+if "has_challan" not in st.session_state:
+    st.session_state["has_challan"] = True
+if "challan_amount" not in st.session_state:
+    st.session_state["challan_amount"] = 1000
+if "has_pending" not in st.session_state:
+    st.session_state["has_pending"] = True
+
+# --- SIDEBAR: INPUT & SCENARIO SELECTION ---
+with st.sidebar:
     st.header("📋 Case Details")
     
     # Quick Preset Button for the Live Demo
-    if st.button("⚡ Load Ravi's Demo Scenario"):
+    if st.button("⚡ Reset to Ravi's Scenario"):
         st.session_state["from_state"] = "Telangana (TG)"
         st.session_state["to_state"] = "Andhra Pradesh (AP)"
         st.session_state["days_to_expiry"] = 21
         st.session_state["has_challan"] = True
-        st.session_state["has_pending"] = True
         st.session_state["challan_amount"] = 1000
+        st.session_state["has_pending"] = True
+        st.rerun()
 
     from_state = st.selectbox(
         "Current Registration State",
@@ -78,16 +95,17 @@ with st.sidebar:
         key="to_state"
     )
     
-    days_to_expiry = st.slider("Days Until Licence Expiry", 1, 60, 21, key="days_to_expiry")
-    has_challan = st.checkbox("Unpaid Traffic Challan?", value=True, key="has_challan")
-    challan_amount = st.number_input("Challan Amount (₹)", value=1000 if has_challan else 0, key="challan_amount")
-    has_pending = st.checkbox("Pending Ownership Request?", value=True, key="has_pending")
+    # Note: Do not pass both `value` and `key` to avoid widget conflict
+    days_to_expiry = st.slider("Days Until Licence Expiry", 1, 60, key="days_to_expiry")
+    has_challan = st.checkbox("Unpaid Traffic Challan?", key="has_challan")
+    challan_amount = st.number_input("Challan Amount (₹)", key="challan_amount")
+    has_pending = st.checkbox("Pending Ownership Request?", key="has_pending")
 
     st.markdown("---")
     st.subheader("⚠️ Live Demo Stress Tests")
     simulate_rejection = st.toggle("Simulate: Pending Request REJECTED mid-flow")
     slot_scarcity = st.toggle("Simulate: RTO Appointment Collapse (High Wait)")
-
+    
 # --- 1. JURISDICTION RULE RESOLUTION & FALLBACK ---
 if to_state not in RULE_PACKS:
     st.error(f"⚠️ Rule Pack Missing: Official rules for '{to_state}' are not available in the current database.")

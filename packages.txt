@@ -1,4 +1,1 @@
-streamlit
 graphviz
-google-genai
-python-dotenv

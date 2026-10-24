@@ -314,7 +314,6 @@ elif ownership_status == "Pending (Normal Review)":
 
 # 2. Penalty Clearance (Source Jurisdiction)
 if has_challan and challan_amount > 0:
-    # Note: In Indian RTOs, an unpaid challan blocks ownership/NOC clearance, so if both exist, challan must clear first
     challan_task = {
         "id": "penalty",
         "title": f"Clear Eligible Unpaid Penalty ({from_state})",
@@ -478,14 +477,40 @@ if slot_scarcity:
         "Alternative timing and late-fee risk are now displayed separately."
     )
 
-# --- DEPENDENCY GRAPH (DYNAMICALLY NUMBERED) ---
+# --- DEPENDENCY GRAPH (READABLE & RESPONSIVE) ---
 st.markdown("---")
-st.subheader("🕸️ Prerequisite & Blocker Dependency Graph")
+g_col1, g_col2 = st.columns([2, 1])
+with g_col1:
+    st.subheader("🕸️ Prerequisite & Blocker Dependency Graph")
+with g_col2:
+    graph_layout = st.radio(
+        "Flowchart View Mode",
+        ["2-Row Grid (Best Readability)", "Vertical Flow", "Full Horizontal"],
+        index=0,
+        horizontal=True
+    )
 
-dot_code = """
-digraph G {
-    rankdir=LR;
-    node [shape=box, style="filled,rounded", fontname="Arial", margin=0.2];
+SHORT_GRAPH_TITLES = {
+    "penalty": f"Clear Unpaid Penalty\\n({from_state.split()[0]})",
+    "ownership": (
+        f"Rectify Rejected Transfer\\n({from_state.split()[0]})"
+        if "Rejected" in ownership_status
+        else f"Resolve Ownership / NOC\\n({from_state.split()[0]})"
+    ),
+    "address_proof": f"Confirm Address Proof\\n({to_state.split()[0]})",
+    "rc_update": f"Update RC Details\\n({to_state.split()[0]})",
+    "dl_address": f"Update DL Address\\n({to_state.split()[0]})",
+    "dl_renewal": f"Start DL Renewal\\n({to_state.split()[0]})"
+}
+
+rank_dir = "TB" if graph_layout != "Full Horizontal" else "LR"
+
+dot_code = f"""
+digraph G {{
+    rankdir={rank_dir};
+    graph [pad="0.2", nodesep="0.35", ranksep="0.45", bgcolor="transparent"];
+    node [shape=box, style="filled,rounded", fontname="Helvetica,Arial,sans-serif", fontsize=13, margin="0.22,0.14", penwidth=1.8];
+    edge [fontname="Helvetica,Arial,sans-serif", fontsize=10, fontcolor="#94a3b8", color="#64748b", penwidth=1.5];
 """
 
 for idx, t in enumerate(scheduled_tasks, start=1):
@@ -502,16 +527,26 @@ for idx, t in enumerate(scheduled_tasks, start=1):
     else:
         fill, border = "#dae8fc", "#1565c0"
 
-    label_text = f"{idx}. {t['title']}\\n[Safe Date: {safe_str}]\\n({t['duration']}d | ₹{t['cost']})"
+    short_title = SHORT_GRAPH_TITLES.get(tid, t["title"])
+    label_text = f"Step {idx}: {short_title}\\nSafe Date: {safe_str}\\n({t['duration']}d | ₹{t['cost']})"
     dot_code += f'    {tid} [label="{label_text}", fillcolor="{fill}", color="{border}"];\n'
+
+# Arrange into 2 balanced rows if 2-Row Grid is selected
+if graph_layout == "2-Row Grid (Best Readability)" and len(scheduled_tasks) > 3:
+    mid = (len(scheduled_tasks) + 1) // 2
+    row1_ids = [t["id"] for t in scheduled_tasks[:mid]]
+    row2_ids = [t["id"] for t in scheduled_tasks[mid:]]
+    dot_code += "    { rank=same; " + "; ".join(row1_ids) + "; }\n"
+    dot_code += "    { rank=same; " + "; ".join(row2_ids) + "; }\n"
 
 for i in range(len(scheduled_tasks) - 1):
     c_id = scheduled_tasks[i]["id"]
     n_id = scheduled_tasks[i + 1]["id"]
-    dot_code += f'    {c_id} -> {n_id} [label="Gated prerequisite"];\n'
+    dot_code += f'    {c_id} -> {n_id} [label=" Gated "];\n'
 
 dot_code += "}"
-st.graphviz_chart(dot_code)
+
+st.graphviz_chart(dot_code, use_container_width=(graph_layout != "Full Horizontal"))
 
 # --- PER-TASK SAFE DATES & EXPLAINABILITY TABLE (SLIDE 4 & 5) ---
 st.markdown("---")

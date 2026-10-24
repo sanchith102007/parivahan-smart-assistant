@@ -4,7 +4,7 @@ import os
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Parivahan Smart Assistant",
+    page_title="vahan chalak seva",
     page_icon="🚗",
     layout="wide"
 )

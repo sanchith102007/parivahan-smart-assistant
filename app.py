@@ -438,7 +438,6 @@ for idx, t in enumerate(scheduled_tasks, start=1):
             st.markdown(f"**Duration:** `{t['duration']} days`")
             st.markdown(f"**Simulated Fee:** `₹{t['cost']}`")
 
-
 # ==========================================
 # 10. ACCESSIBLE INTERACTION (VOICE, AI & TTS)
 # ==========================================
@@ -480,8 +479,8 @@ with v_col2:
     readback_confirmed = st.checkbox("✅ I confirm this read-back summary matches my case", value=True)
 
 def generate_local_rule_guidance():
-    steps_summary = " -> ".join([f"Step {i}: {t['title']}" for i, t in enumerate(scheduled_tasks, start=1)])
-    vernacular = "ముఖ్య గమనిక (Telugu): ముందుగా పెండింగ్ చలాన్ మరియు NOC పూర్తి చేయండి." if "Telugu" in lang_choice else "मुख्य सूचना (Hindi): कृपया पहले लंबित चालान और एनओसी क्लियर करें।"
+    steps_summary = f"{len(scheduled_tasks)} sequential steps coordinated."
+    vernacular = "ముఖ్య గమనిక (Telugu): ముందుగా పెండింగ్ చలాన్ మరియు NOC పూర్తి చేయండి." if "Telugu" in lang_choice else "मुख्य सूचना (Hindi): कृपया पहले लंबित चालान और एनओसी क्लियर करें."
     return f"• What to Do First Today: Start with {first_task['title']} by {first_task['working_target'].strftime('%d %b %Y')}.\n\n• Sequence: {steps_summary}\n\n• Cost: ₹{total_estimated_cost}. Tiered late-fee risk: ₹{computed_late_fee}.\n\n• {vernacular}"
 
 if not st.session_state["last_generated_brief"]:
@@ -497,7 +496,7 @@ with btn_col1:
                     try:
                         response = client.models.generate_content(
                             model="gemini-3.8-flash",
-                            contents=f"Provide 3 bullet points for citizen moving {vehicle_type} {vehicle_reg} from {from_state} to {to_state}. Expiry: {days_to_expiry}d. Language: {lang_choice}."
+                            contents=f"Provide 3 concise bullet points for citizen moving {vehicle_type} {vehicle_reg} from {from_state} to {to_state}. Expiry: {days_to_expiry}d. Language: {lang_choice}."
                         )
                         if response and response.text:
                             st.session_state["last_generated_brief"] = response.text
@@ -507,15 +506,25 @@ with btn_col1:
                 st.session_state["last_generated_brief"] = generate_local_rule_guidance()
 
 with btn_col2:
-    clean_speech_text = readback_text + " Here is your action plan: " + st.session_state["last_generated_brief"].replace("*", "").replace("#", "").replace("•", "")
-    safe_js_text = json.dumps(clean_speech_text)
+    st.markdown("**🔊 Text-to-Speech Aloud Speaker**")
+    clean_speech_text = readback_text + " Summary: " + st.session_state["last_generated_brief"].replace("*", "").replace("#", "").replace("•", "")
+    safe_js_text = json.dumps(clean_speech_text[:400]) # Safe truncation preventing overflow
+    
     tts_html = f"""
-    <div style="display: flex; gap: 10px; align-items: center; margin-top: 1px;">
-        <button onclick='window.speechSynthesis.cancel(); const msg = new SpeechSynthesisUtterance({safe_js_text}); msg.rate=0.98; window.speechSynthesis.speak(msg);' style="background-color: #1f2937; color: #f8fafc; border: 1px solid #475569; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; width: 72%; height: 40px;">🔊 Speak Action Brief Aloud</button>
-        <button onclick="window.speechSynthesis.cancel();" style="background-color: #3f1d28; color: #fca5a5; border: 1px solid #ef4444; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 14px; width: 26%; height: 40px;">⏹️ Stop</button>
+    <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+        <button onclick='window.speechSynthesis.cancel(); const msg = new SpeechSynthesisUtterance({safe_js_text}); msg.rate=0.98; window.speechSynthesis.speak(msg);' style="
+            background-color: #1f2937; color: #f8fafc; border: 1px solid #475569; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 14px; font-weight: 500; flex: 3; height: 44px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        ">
+            🔊 Speak Aloud
+        </button>
+        <button onclick="window.speechSynthesis.cancel();" style="
+            background-color: #3f1d28; color: #fca5a5; border: 1px solid #ef4444; padding: 10px 10px; border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 14px; flex: 1; height: 44px; white-space: nowrap;
+        ">
+            ⏹️ Stop
+        </button>
     </div>
     """
-    components.html(tts_html, height=48)
+    components.html(tts_html, height=52)
 
 if st.session_state["last_generated_brief"]:
     st.success(st.session_state["last_generated_brief"])

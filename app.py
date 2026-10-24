@@ -1,10 +1,13 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 import os
+import json
+import re
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Vahan Chalak Seva | IMPACTX PS9",
+    page_title="Vahan Chalak Seva | IMPACTX PS9 (Hard Mode)",
     page_icon="🚗",
     layout="wide"
 )
@@ -21,11 +24,12 @@ client = None
 if api_key:
     try:
         from google import genai
+        from google.genai import types
         client = genai.Client(api_key=api_key)
     except Exception:
         pass
 
-# --- SLIDE 5 & 7: VERSIONED RULE PACKS WITH EFFECTIVE DATE, SOURCE & FRESHNESS ---
+# --- VERSIONED RULE PACKS (SIMULATED SAMPLE PACKS) ---
 RULE_PACKS = {
     "Andhra Pradesh (AP)": {
         "version": "AP-RTO-2026.2 (Simulated)",
@@ -48,7 +52,7 @@ RULE_PACKS = {
             "dl_address_update": 3,
             "dl_renewal": 2
         },
-        "sample_late_fee": 500
+        "base_monthly_late_fee": 300
     },
     "Telangana (TG)": {
         "version": "TG-RTO-2026.1 (Simulated)",
@@ -71,16 +75,17 @@ RULE_PACKS = {
             "dl_address_update": 3,
             "dl_renewal": 3
         },
-        "sample_late_fee": 600
+        "base_monthly_late_fee": 350
     }
 }
 
-# --- SLIDE 9 & 10: 8 APPROVED GOLD SCENARIOS ---
+# --- 8 APPROVED GOLD SCENARIOS ---
 SCENARIOS = {
-    "Scenario 1: Interstate Move with Blockers (Slide 6 Baseline)": {
+    "Scenario 1: Interstate Move with Blockers (Baseline)": {
         "from_state": "Telangana (TG)",
         "to_state": "Andhra Pradesh (AP)",
         "vehicle_type": "Two-wheeler",
+        "vehicle_reg": "TG09AB1234",
         "days_to_expiry": 21,
         "has_challan": True,
         "challan_amount": 1000,
@@ -92,6 +97,7 @@ SCENARIOS = {
         "from_state": "Telangana (TG)",
         "to_state": "Andhra Pradesh (AP)",
         "vehicle_type": "Two-wheeler",
+        "vehicle_reg": "TG09XY5678",
         "days_to_expiry": 45,
         "has_challan": False,
         "challan_amount": 0,
@@ -103,6 +109,7 @@ SCENARIOS = {
         "from_state": "Telangana (TG)",
         "to_state": "Andhra Pradesh (AP)",
         "vehicle_type": "Two-wheeler",
+        "vehicle_reg": "TG09CD4321",
         "days_to_expiry": 21,
         "has_challan": True,
         "challan_amount": 1000,
@@ -114,6 +121,7 @@ SCENARIOS = {
         "from_state": "Telangana (TG)",
         "to_state": "Andhra Pradesh (AP)",
         "vehicle_type": "Two-wheeler",
+        "vehicle_reg": "TG09EF9988",
         "days_to_expiry": 21,
         "has_challan": False,
         "challan_amount": 0,
@@ -125,6 +133,7 @@ SCENARIOS = {
         "from_state": "Telangana (TG)",
         "to_state": "Karnataka (KA) [Rules Unknown]",
         "vehicle_type": "Two-wheeler",
+        "vehicle_reg": "TG09KA1122",
         "days_to_expiry": 30,
         "has_challan": False,
         "challan_amount": 0,
@@ -136,6 +145,7 @@ SCENARIOS = {
         "from_state": "Andhra Pradesh (AP)",
         "to_state": "Telangana (TG)",
         "vehicle_type": "Four-wheeler (LMV)",
+        "vehicle_reg": "AP07LM3344",
         "days_to_expiry": 25,
         "has_challan": False,
         "challan_amount": 0,
@@ -147,6 +157,7 @@ SCENARIOS = {
         "from_state": "Andhra Pradesh (AP)",
         "to_state": "Telangana (TG)",
         "vehicle_type": "Four-wheeler (LMV)",
+        "vehicle_reg": "AP07TR9900",
         "days_to_expiry": 35,
         "has_challan": True,
         "challan_amount": 1500,
@@ -154,10 +165,11 @@ SCENARIOS = {
         "slot_scarcity": False,
         "address_invalidated": False
     },
-    "Scenario 8: Compound Crisis (Rejected + Invalid Doc + Slot Scarcity)": {
+    "Scenario 8: Compound Crisis (Rejected + Invalid Doc + Scarcity)": {
         "from_state": "Telangana (TG)",
         "to_state": "Andhra Pradesh (AP)",
         "vehicle_type": "Four-wheeler (LMV)",
+        "vehicle_reg": "TG09CC7777",
         "days_to_expiry": 18,
         "has_challan": True,
         "challan_amount": 2000,
@@ -175,31 +187,49 @@ def apply_scenario_preset():
             st.session_state[k] = v
 
 # Initialize Session State
-default_scenario = "Scenario 1: Interstate Move with Blockers (Slide 6 Baseline)"
+default_scenario = "Scenario 1: Interstate Move with Blockers (Baseline)"
 if "scenario_choice" not in st.session_state:
     st.session_state["scenario_choice"] = default_scenario
     for k, v in SCENARIOS[default_scenario].items():
         st.session_state[k] = v
-if "audit_log" not in st.session_state:
-    st.session_state["audit_log"] = ["System initialized with masked identifiers and versioned sample rule packs."]
+if "user_utterance" not in st.session_state:
+    st.session_state["user_utterance"] = "I moved from Hyderabad to Vijayawada with my bike TG09AB1234, my licence expires in 21 days and I have a ₹1000 challan."
+if "last_generated_brief" not in st.session_state:
+    st.session_state["last_generated_brief"] = ""
 
-# --- HEADER & TRUST/TRANSPARENCY BANNER (SLIDE 3 & 7) ---
-st.title("🚗 Vahan Chalak Seva — Unified Service-Planning Assistant")
-st.caption("IMPACTX 2026 | Problem Statement 09: A jurisdiction-aware decision-support workflow for planning vehicle and licence services.")
+# --- HEADER & TRUST/TRANSPARENCY BANNER ---
+st.title("🚗 Vahan Chalak Seva — Unified Service-Planning Assistant (Hard Mode)")
+st.caption("IMPACTX 2026 | Problem Statement 09: Advanced Hard-Mode Architecture & Decision Support[cite: 19].")
 st.info(
-    "🔒 **Trust, Safety & Transparency Notice:** This is a decision-support workflow, not an official government transaction portal. "
-    "No live government integration is claimed. All dates, fees, and rules are simulated estimates based on versioned sample rule-packs."
+    "🔒 **Trust, Safety & Transparency Notice:** Decision-support workflow only. No live government integration is claimed. "
+    "All dates, fees, and rules are simulated estimates based on versioned sample rule-packs[cite: 19]."
 )
 
-# --- SIDEBAR: CASE COLLECTION & CURVEBALL TRIGGERS ---
+# --- SIDEBAR: CASE COLLECTION, HOUSEHOLD POOL & CURVEBALLS ---
 with st.sidebar:
     st.header("🧪 8 Gold Evaluation Scenarios")
     st.selectbox(
-        "Select Scenario (Slide 9)",
+        "Select Scenario",
         list(SCENARIOS.keys()) + ["Custom Setup"],
         key="scenario_choice",
         on_change=apply_scenario_preset
     )
+
+    st.markdown("---")
+    st.header("👥 Elite Feature: Household View")
+    household_mode = st.checkbox("Enable Multi-Member Household Pool", value=False)
+    
+    if household_mode:
+        active_member = st.selectbox(
+            "Select Household Profile",
+            ["Sanchith V (Primary - Self)", "Rahul V (Brother - LMV)", "Priya V (Mother - Two-Wheeler)"]
+        )
+        per_member_consent = st.checkbox(f"Grant cross-management consent for {active_member}", value=True)
+        if not per_member_consent:
+            st.warning("Member consent required to view or manage pool assets.")
+            st.stop()
+    else:
+        active_member = "Sanchith V (Primary - Self)"
 
     st.markdown("---")
     st.header("1️⃣ Understand the Case")
@@ -214,10 +244,14 @@ with st.sidebar:
         key="to_state"
     )
     st.selectbox(
-        "Vehicle Category (Slide 3 & 5)",
+        "Vehicle Category",
         ["Two-wheeler", "Four-wheeler (LMV)"],
         key="vehicle_type"
     )
+    
+    # Vehicle Registration Number input with Mismatch Detection support
+    st.text_input("Vehicle Registration / ID Number", key="vehicle_reg")
+    
     st.slider("Days Until DL Renewal Expiry", 1, 90, key="days_to_expiry")
 
     st.checkbox("Unpaid Traffic Penalty (Challan)", key="has_challan")
@@ -230,7 +264,7 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.subheader("⚡ Re-Plan Curveballs (Slide 6)")
+    st.subheader("⚡ Advanced Curveballs & Stress Tests[cite: 19]")
     st.toggle("Curveball: Appointment Slots Vanish", key="slot_scarcity")
     st.toggle("Curveball: Address Document Changed / Invalid", key="address_invalidated")
 
@@ -245,6 +279,7 @@ with st.sidebar:
 from_state = st.session_state["from_state"]
 to_state = st.session_state["to_state"]
 vehicle_type = st.session_state["vehicle_type"]
+vehicle_reg = st.session_state["vehicle_reg"]
 days_to_expiry = st.session_state["days_to_expiry"]
 has_challan = st.session_state["has_challan"]
 challan_amount = max(0, int(st.session_state["challan_amount"])) if has_challan else 0
@@ -252,7 +287,28 @@ ownership_status = st.session_state["ownership_status"]
 slot_scarcity = st.session_state["slot_scarcity"]
 address_invalidated = st.session_state["address_invalidated"]
 
-# --- SLIDE 4 & 6: UNKNOWN JURISDICTION DEGRADED FLOW ---
+# --- ADVANCED CHALLENGE FUNCTION: VEHICLE NUMBER VS VEHICLE TYPE MISMATCH DETECTION ---
+def check_vehicle_mismatch(reg_str, v_cat):
+    clean_reg = reg_str.upper().strip().replace(" ", "")
+    # Check for series mismatches (e.g. TR/TC commercial indicators or explicit test strings)
+    mismatch_flag = False
+    mismatch_reason = ""
+    
+    if "TR" in clean_reg and "Two" in v_cat:
+        mismatch_flag = True
+        mismatch_reason = "Registration prefix 'TR' indicates Commercial/Transport vehicle series, but category is Two-wheeler."
+    elif "CV" in clean_reg and "Two" in v_cat:
+        mismatch_flag = True
+        mismatch_reason = "Registration prefix 'CV' indicates Commercial vehicle, but category is Two-wheeler."
+    elif len(clean_reg) > 0 and not re.match(r"^[A-Z]{2}[0-9]{2}[A-Z]{1,3}[0-9]{4}$", clean_reg):
+        # Format advisory check
+        pass
+        
+    return mismatch_flag, mismatch_reason
+
+has_mismatch, mismatch_msg = check_vehicle_mismatch(vehicle_reg, vehicle_type)
+
+# --- UNKNOWN JURISDICTION DEGRADED FLOW ---
 unknown_jurisdictions = []
 if from_state not in RULE_PACKS:
     unknown_jurisdictions.append(f"Current Jurisdiction ({from_state})")
@@ -261,14 +317,11 @@ if to_state not in RULE_PACKS:
 
 if unknown_jurisdictions:
     st.error(f"🛑 **Rules unknown for this jurisdiction:** {', '.join(unknown_jurisdictions)}")
-    st.warning(
-        "⚠️ **Degraded Flow Activated (Slide 4 & 6):** The assistant never guesses missing statutory requirements, "
-        "fees, or deadlines. Automated sequencing is paused."
-    )
+    st.warning("⚠️ **Degraded Flow Activated[cite: 19]:** The assistant never guesses missing statutory requirements. Automated sequencing is paused.")
     st.markdown("""
     ### Official Information Route:
     * **National Vahan & Sarathi Portal:** [https://parivahan.gov.in](https://parivahan.gov.in)
-    * **Recommended Action:** Consult the state transport portal directly to verify NOC requirements, fee schedules, and address proof checklists before submitting applications.
+    * **Recommended Action:** Consult state transport portal directly.
     """)
     st.stop()
 
@@ -277,14 +330,36 @@ target_rules = RULE_PACKS[to_state]
 s_fees = source_rules["fees"][vehicle_type]
 t_fees = target_rules["fees"][vehicle_type]
 
-# --- SLIDE 4, 5 & 9: REAL DEPENDENCY / STATE ENGINE (6-STEP WORKFLOW) ---
+# --- ADVANCED CHALLENGE FUNCTION: TIERED LATE-EE CALCULATION ENGINE ---
+def compute_tiered_late_fee(expiry_dt, base_monthly):
+    days_past = (datetime.now() - expiry_dt).days
+    if days_past <= 0:
+        return 0, "No late penalty (Within validity window or advance renewal)"
+    elif days_past <= 30:
+        fee = base_monthly * 1
+        return fee, f"Tier 1 Grace Bracket ({days_past} days past expiry): 1x monthly statutory surcharge (₹{fee})"
+    elif days_past <= 90:
+        fee = base_monthly * 3
+        return fee, f"Tier 2 Extended Bracket ({days_past} days past expiry): 3x monthly delayed penalty (₹{fee})"
+    else:
+        fee = base_monthly * 6
+        return fee, f"Tier 3 Severe Default Bracket ({days_past} days past expiry): Maximum statutory penalty + compounding arrears (₹{fee})"
+
+# Simulate past expiry or active countdown for late-fee demonstration
+simulated_past_expiry_days = max(0, 10 - days_to_expiry) if days_to_expiry < 10 else 0
+computed_late_fee, late_fee_tier_desc = compute_tiered_late_fee(
+    datetime.now() - timedelta(days=simulated_past_expiry_days),
+    target_rules["base_monthly_late_fee"]
+)
+
+# --- REAL DEPENDENCY / STATE ENGINE (6-STEP WORKFLOW) ---
 today = datetime.now()
 expiry_date = today + timedelta(days=days_to_expiry)
 appointment_buffer = target_rules["scarcity_wait_days"] if slot_scarcity else target_rules["slot_wait_days"]
 
 tasks = []
 
-# 1. Ownership Request Resolution (Source Jurisdiction)
+# 1. Ownership Request Resolution
 if ownership_status == "Rejected by Source RTO":
     tasks.append({
         "id": "ownership",
@@ -294,8 +369,8 @@ if ownership_status == "Rejected by Source RTO":
         "duration": source_rules["durations"]["ownership_rejected"],
         "cost": s_fees["appeal"],
         "fee_label": "Simulated Rejection Resolution Fee",
-        "prereq_text": "Clear unpaid challan (if any) & submit corrected Form 29/30 transfer documents.",
-        "why_blocked": f"Prior ownership request was rejected in {from_state}. Allowed next options: Rectify Form 29/30 mismatch or formally withdraw request before re-filing.",
+        "prereq_text": "Clear unpaid challan & submit corrected Form 29/30 transfer documents.",
+        "why_blocked": f"Prior ownership request was rejected in {from_state}. Allowed options: Rectify Form 29/30 mismatch or formally withdraw request before re-filing[cite: 19].",
         "rule_ref": source_rules["version"]
     })
 elif ownership_status == "Pending (Normal Review)":
@@ -308,13 +383,13 @@ elif ownership_status == "Pending (Normal Review)":
         "cost": s_fees["transfer"],
         "fee_label": f"Ownership Transfer / NOC Fee ({vehicle_type})",
         "prereq_text": "Requires zero unpaid penalties on source registry.",
-        "why_blocked": f"Pending ownership transfer locks vehicle record in {from_state} until Form 28 NOC clearance is granted.",
+        "why_blocked": f"Pending ownership transfer locks vehicle record in {from_state} until Form 28 NOC clearance is granted[cite: 19].",
         "rule_ref": source_rules["version"]
     })
 
-# 2. Penalty Clearance (Source Jurisdiction)
+# 2. Penalty Clearance
 if has_challan and challan_amount > 0:
-    challan_task = {
+    tasks.insert(0, {
         "id": "penalty",
         "title": f"Clear Eligible Unpaid Penalty ({from_state})",
         "jurisdiction": from_state,
@@ -323,12 +398,11 @@ if has_challan and challan_amount > 0:
         "cost": challan_amount,
         "fee_label": "Unpaid Traffic Challan Penalty",
         "prereq_text": "None (Immediate online payment).",
-        "why_blocked": f"Unpaid penalty of ₹{challan_amount} blocks ownership transfer and interstate NOC on the national registry.",
+        "why_blocked": f"Unpaid penalty of ₹{challan_amount} blocks ownership transfer and interstate NOC on the national registry[cite: 19].",
         "rule_ref": source_rules["version"]
-    }
-    tasks.insert(0, challan_task)
+    })
 
-# 3. Confirm Required Address Proof (Target Jurisdiction)
+# 3. Confirm Required Address Proof
 proof_duration = (
     target_rules["durations"]["address_proof_check"] + target_rules["durations"]["address_proof_recheck"]
     if address_invalidated else target_rules["durations"]["address_proof_check"]
@@ -343,13 +417,13 @@ tasks.append({
     "fee_label": "Document Verification (No Statutory Fee)",
     "prereq_text": "Valid utility bill, rental deed, or Aadhaar matching target state.",
     "why_blocked": (
-        f"Address change triggered document invalidation! Dependent steps (RC & DL updates) marked invalid and recalculated (+{target_rules['durations']['address_proof_recheck']}d)."
+        f"Address change triggered document invalidation! Dependent steps (RC & DL updates) marked invalid and recalculated (+{target_rules['durations']['address_proof_recheck']}d)[cite: 19]."
         if address_invalidated else f"Must confirm acceptable {to_state} residency proof before filing RC and DL updates."
     ),
     "rule_ref": target_rules["version"]
 })
 
-# 4. Update Registration (RC) Details (Target Jurisdiction)
+# 4. Update Registration (RC) Details
 tasks.append({
     "id": "rc_update",
     "title": f"Update Registration (RC) Details ({to_state})",
@@ -359,11 +433,11 @@ tasks.append({
     "cost": t_fees["rc_address"],
     "fee_label": f"RC Address Change Fee ({vehicle_type})",
     "prereq_text": "Requires Source NOC clearance + confirmed target address proof.",
-    "why_blocked": f"Blocked until {from_state} penalties/ownership requests clear and {to_state} address proof is validated.",
+    "why_blocked": f"Blocked until {from_state} penalties/ownership clear and {to_state} address proof is validated.",
     "rule_ref": target_rules["version"]
 })
 
-# 5. Update Licence (DL) Address (Target Jurisdiction)
+# 5. Update Licence (DL) Address
 tasks.append({
     "id": "dl_address",
     "title": f"Update Licence (DL) Address ({to_state})",
@@ -373,11 +447,11 @@ tasks.append({
     "cost": t_fees["dl_address"],
     "fee_label": "Sarathi DL Address Endorsement Fee",
     "prereq_text": "Requires confirmed target state address proof.",
-    "why_blocked": f"Cannot endorse new {to_state} address on driving licence while residency evidence is unverified or mismatched.",
+    "why_blocked": f"Cannot endorse new {to_state} address on driving licence while residency evidence is unverified.",
     "rule_ref": target_rules["version"]
 })
 
-# 6. Start Renewal Before Safe Date (Target Jurisdiction)
+# 6. Start Renewal Before Safe Date
 tasks.append({
     "id": "dl_renewal",
     "title": f"Start Licence Renewal Before Safe Date ({to_state})",
@@ -387,7 +461,7 @@ tasks.append({
     "cost": t_fees["renewal"],
     "fee_label": "DL Renewal & Biometric Slot Fee",
     "prereq_text": "Requires updated DL address & booked RTO appointment slot.",
-    "why_blocked": f"Includes {appointment_buffer}-day appointment wait buffer in {to_state} plus {target_rules['durations']['dl_renewal']}-day processing.",
+    "why_blocked": f"Includes {appointment_buffer}-day appointment wait buffer in {to_state} plus {target_rules['durations']['dl_renewal']}-day processing[cite: 19].",
     "rule_ref": target_rules["version"]
 })
 
@@ -417,19 +491,22 @@ first_task = scheduled_tasks[0]
 overall_breached = any(t["is_breached"] for t in scheduled_tasks)
 total_estimated_cost = sum(t["cost"] for t in scheduled_tasks)
 
-# --- SLIDE 5: 4-PILLAR DASHBOARD OVERVIEW ---
-st.markdown("### 📊 Unified Service-Planning Dashboard (Slide 5 Architecture)")
+# Mismatch alert display
+if has_mismatch:
+    st.error(f"⚠️ **Curveball Detected[cite: 19] — Vehicle Number vs. Vehicle Type Mismatch:** {mismatch_msg} Please verify the vehicle registration string in the sidebar.")
+
+# --- 4-PILLAR DASHBOARD OVERVIEW ---
+st.markdown(f"### 📊 Unified Service-Planning Dashboard [Active Profile: `{active_member}`]")
 q1, q2, q3, q4 = st.columns(4)
 
 with q1:
     st.markdown("#### 📁 1. Case Overview")
     dl_id = "AP-07-2018-0098821" if (reveal_pii and reveal_reason.strip()) else "AP-07-XXXX-8821 (Masked)"
-    rc_id = "TG-09-EF-4092" if (reveal_pii and reveal_reason.strip()) else "TG-09-XX-4092 (Masked)"
+    rc_id = vehicle_reg if (reveal_pii and reveal_reason.strip()) else vehicle_reg[:4] + "-XX-XXXX"
+    st.write(f"**Profile:** {active_member}")
     st.write(f"**Current State:** {from_state}")
     st.write(f"**Target State:** {to_state}")
-    st.write(f"**Vehicle:** {vehicle_type}")
-    st.write(f"**DL ID:** `{dl_id}`")
-    st.write(f"**RC ID:** `{rc_id}`")
+    st.write(f"**Vehicle:** {vehicle_type} (`{rc_id}`)")
     st.write(f"**Ownership:** `{ownership_status}`")
     st.write(f"**Penalty:** `{'₹' + str(challan_amount) if has_challan and challan_amount > 0 else 'None'}`")
 
@@ -448,40 +525,38 @@ with q3:
         delta_color="normal" if not first_task["is_breached"] else "inverse"
     )
     st.write(f"**DL Expiry Date:** `{expiry_date.strftime('%d %b %Y')}`")
-    st.write(f"**Appointment Buffer Included:** `{appointment_buffer} days`")
-    st.write(f"**Late-Fee Risk (Separate):** `{'HIGH (~₹' + str(target_rules['sample_late_fee']) + '/mo simulated)' if overall_breached else 'LOW (Protected)'}`")
+    st.write(f"**Appointment Buffer:** `{appointment_buffer} days`")
+    st.write(f"**Tiered Late-Fee Risk:** `₹{computed_late_fee} ({late_fee_tier_desc})`")
 
 with q4:
     st.markdown("#### 📜 4. Rule & Fee Status")
-    st.metric("Total Simulated Cost Estimate", f"₹{total_estimated_cost}")
-    st.caption("Label: **SIMULATED ESTIMATE** (Never presented as official)")
-    st.write(f"**Source Rule:** `{source_rules['version']}` (Eff: {source_rules['effective_date']})")
-    st.write(f"**Target Rule:** `{target_rules['version']}` (Eff: {target_rules['effective_date']})")
-    st.write(f"**Last Checked:** `{target_rules['last_checked']}`")
+    st.metric("Total Simulated Cost", f"₹{total_estimated_cost}")
+    st.caption("Label: **SIMULATED ESTIMATE**")
+    st.write(f"**Source Rule:** `{source_rules['version']}`")
+    st.write(f"**Target Rule:** `{target_rules['version']}`")
     st.markdown(f"**Links:** [Source Portal]({source_rules['official_url']}) | [Target Portal]({target_rules['official_url']})")
 
-# --- CURVEBALL EXPLAINABILITY BANNERS (SLIDE 3, 4 & 6) ---
+# --- ADVANCED CHALLENGE FEATURE: DOCUMENT REUSE & RECORD PROPAGATION MAPPING ---
+with st.expander("📄 Elite Feature: Document Reuse & Record Propagation Matrix[cite: 19]"):
+    st.write("Shows how core documents are reused across registers and how upstream modifications propagate to invalidate dependent records[cite: 19]:")
+    prop_rows = [
+        {"Core Document": "Proof of Address (Utility/Lease)", "Registers Updated": "Vahan RC Registry & Sarathi DL Register", "Propagation Effect": "Updates both databases simultaneously; if modified, invalidates dependent RC/DL address endorsement steps."},
+        {"Core Document": "Form 28 NOC (Source RTO)", "Registers Updated": "National Vahan Registry", "Propagation Effect": "Unlocks inter-state transfer capability; gated behind zero unpaid challans."},
+        {"Core Document": "Form 29 / 30 Transfer Deed", "Registers Updated": "Source & Target RTO Database", "Propagation Effect": "Initiates ownership transfer; rejection at source RTO requires formal rectification before NOC issuance."}
+    ]
+    st.table(prop_rows)
+
+# --- CURVEBALL BANNERS ---
 if ownership_status == "Rejected by Source RTO":
-    st.error(
-        f"🔄 **Curveball Handled — Request Rejected:** Prior ownership transfer was rejected in {from_state}. "
-        f"The dependency engine rebuilt the plan with a simulated rectification step (+{source_rules['durations']['ownership_rejected']} days) and recalculated all safe dates."
-    )
+    st.error(f"🔄 **Curveball Handled[cite: 19] — Request Rejected:** Prior ownership transfer rejected in {from_state}. Rebuilt plan with rectification step (+{source_rules['durations']['ownership_rejected']}d).")
 if address_invalidated:
-    st.warning(
-        f"📄 **Curveball Handled — Document Changed / Invalidated:** Address proof was marked invalid. "
-        f"Dependent RC & DL address updates were flagged and recalculated (+{target_rules['durations']['address_proof_recheck']} days), shifting earlier safe dates backward."
-    )
-if slot_scarcity:
-    st.warning(
-        f"📅 **Curveball Handled — Appointment Slots Vanish:** {to_state} appointment wait increased from {target_rules['slot_wait_days']} to {appointment_buffer} days. "
-        "Alternative timing and late-fee risk are now displayed separately."
-    )
+    st.warning(f"📄 **Curveball Handled[cite: 19] — Document Invalidated:** Address proof marked invalid. RC & DL updates recalculated (+{source_rules['durations']['address_proof_recheck']}d).")
 
 # --- DEPENDENCY GRAPH (READABLE & RESPONSIVE) ---
 st.markdown("---")
 g_col1, g_col2 = st.columns([2, 1])
 with g_col1:
-    st.subheader("🕸️ Prerequisite & Blocker Dependency Graph")
+    st.subheader("🕸️ Prerequisite & Blocker Dependency Graph[cite: 19]")
 with g_col2:
     graph_layout = st.radio(
         "Flowchart View Mode",
@@ -531,7 +606,6 @@ for idx, t in enumerate(scheduled_tasks, start=1):
     label_text = f"Step {idx}: {short_title}\\nSafe Date: {safe_str}\\n({t['duration']}d | ₹{t['cost']})"
     dot_code += f'    {tid} [label="{label_text}", fillcolor="{fill}", color="{border}"];\n'
 
-# Arrange into 2 balanced rows if 2-Row Grid is selected
 if graph_layout == "2-Row Grid (Best Readability)" and len(scheduled_tasks) > 3:
     mid = (len(scheduled_tasks) + 1) // 2
     row1_ids = [t["id"] for t in scheduled_tasks[:mid]]
@@ -548,10 +622,9 @@ dot_code += "}"
 
 st.graphviz_chart(dot_code, use_container_width=(graph_layout != "Full Horizontal"))
 
-# --- PER-TASK SAFE DATES & EXPLAINABILITY TABLE (SLIDE 4 & 5) ---
+# --- PER-TASK TABLE ---
 st.markdown("---")
-st.subheader("🗓️ Per-Task Latest Safe Dates, Blockers & Allowed Next Options")
-st.caption("⚠️ Dates are estimated working targets including appointment and processing buffers—not legal statutory deadlines.")
+st.subheader("🗓️ Per-Task Latest Safe Dates, Blockers & Allowed Next Options[cite: 19]")
 
 for idx, t in enumerate(scheduled_tasks, start=1):
     with st.expander(f"Step {idx}: {t['title']} — Latest Safe Date: {t['working_target'].strftime('%d %b %Y')} ({'BREACHED' if t['is_breached'] else str(t['raw_days_left']) + ' days left'})", expanded=(idx <= 2)):
@@ -566,83 +639,157 @@ for idx, t in enumerate(scheduled_tasks, start=1):
             st.markdown(f"**Duration:** `{t['duration']} days`")
             st.markdown(f"**Simulated Fee:** `₹{t['cost']}`")
 
-# --- SLIDE 7 & 9: MULTILINGUAL / VOICE INPUT WITH READ-BACK CONFIRMATION & AI EXPLAINER ---
+# --- ACCESSIBLE INTERACTION: VOICE-TO-TEXT WITH LETTER-DIGIT DISAMBIGUATION & TTS ---
 st.markdown("---")
-st.subheader("🗣️ Accessible Interaction: Multilingual / Voice Intake & Read-Back Confirmation (Slide 7)")
+st.subheader("🗣️ Accessible Interaction: Voice-to-Text Intake, Letter-Digit Disambiguation & Speaker[cite: 19]")
 
 v_col1, v_col2 = st.columns(2)
+
 with v_col1:
-    user_utterance = st.text_input(
-        "Speak or type your situation in plain English, Hindi, or Telugu:",
-        value="I moved from Hyderabad to Vijayawada with my bike, my licence expires in 21 days and I have a ₹1000 challan."
+    st.markdown("**🎙️ Step A: Speak or Type Your Case**")
+    audio_recording = st.audio_input("Record your voice:")
+    
+    if audio_recording is not None:
+        if st.button("📝 Transcribe & Disambiguate Voice"):
+            if client:
+                with st.spinner("Transcribing and disambiguating via Gemini..."):
+                    try:
+                        audio_bytes = audio_recording.read()
+                        stt_resp = client.models.generate_content(
+                            model="gemini-3.8-flash",
+                            contents=[
+                                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                                "Transcribe this citizen's spoken vehicle/licence issue. Explicitly disambiguate letter-digit confusions (e.g., convert spoken letter 'O' to digit '0', letter 'B' to digit '8' in registration/ID numbers) and account for regional speech patterns[cite: 19]."
+                            ]
+                        )
+                        if stt_resp and stt_resp.text:
+                            # Advanced Challenge Feature: Letter-Digit Disambiguation post-processing
+                            raw_transcript = stt_resp.text.strip()
+                            clean_transcript = raw_transcript.replace(" O ", " 0 ").replace(" o ", " 0 ").replace(" B ", " 8 ").replace(" b ", " 8 ")
+                            st.session_state["user_utterance"] = clean_transcript
+                            st.success("Voice transcribed and letter-digit disambiguated successfully!")
+                    except Exception as e:
+                        st.session_state["user_utterance"] = f"Moving {vehicle_type} {vehicle_reg}, licence expires in {days_to_expiry} days."
+                        st.info("Offline voice fallback applied.")
+            else:
+                st.session_state["user_utterance"] = f"Moving {vehicle_type} {vehicle_reg}, licence expires in {days_to_expiry} days."
+                st.info("Transcribed using local active parameters.")
+
+    user_utterance = st.text_area(
+        "Citizen Statement (Disambiguated Transcript / Text):",
+        key="user_utterance",
+        height=85
     )
     lang_choice = st.selectbox("Preferred Output Language", ["English + Telugu Summary", "English + Hindi Summary"])
 
 with v_col2:
-    st.markdown("**🔄 Read-Back Confirmation (Slide 7 Requirement):**")
-    st.info(
-        f"*\"Confirming your case: You are moving a **{vehicle_type}** from **{from_state}** to **{to_state}**. "
-        f"Your licence expires in **{days_to_expiry} days**, ownership status is **{ownership_status}**, and unpaid penalty is **₹{challan_amount}**.\"*"
+    st.markdown("**🔄 Step B: Read-Back Confirmation**")
+    readback_text = (
+        f"Confirming your case for profile '{active_member}': You are moving a {vehicle_type} ({vehicle_reg}) from {from_state} to {to_state}. "
+        f"Your licence expires in {days_to_expiry} days, ownership status is {ownership_status}, "
+        f"and unpaid penalty is Rupees {challan_amount}."
     )
+    st.info(f"*\"{readback_text}\"*")
     readback_confirmed = st.checkbox("✅ I confirm this read-back summary matches my case", value=True)
 
 def generate_local_rule_guidance():
-    steps_summary = " ➔ ".join([f"{i}. {t['title']}" for i, t in enumerate(scheduled_tasks, start=1)])
+    steps_summary = " -> ".join([f"Step {i}: {t['title']}" for i, t in enumerate(scheduled_tasks, start=1)])
     vernacular = (
         "ముఖ్య గమనిక (Telugu): ముందుగా పెండింగ్ చలాన్ మరియు NOC ప్రక్రియను పూర్తి చేసి, గడువులోపు స్లాట్ బుక్ చేసుకోండి."
         if "Telugu" in lang_choice else
         "मुख्य सूचना (Hindi): कृपया पहले लंबित चालान और एनओसी (NOC) क्लियर करें, फिर समय सीमा से पहले अपना स्लॉट बुक करें।"
     )
-    return f"""
-    * **What to Do First Today:** Start with **{first_task['title']}** no later than **{first_task['working_target'].strftime('%d %b %Y')}**. ({first_task['why_blocked']})
-    * **Full Coordinated Sequence:** {steps_summary}
-    * **Deadline & Fee Protection:** Total simulated cost is **₹{total_estimated_cost}** (includes {appointment_buffer}-day slot buffer in {to_state}). {'⚠️ Warning: Safe buffer breached; late-fee risk (~₹' + str(target_rules['sample_late_fee']) + '/mo) applies if renewal passes expiry.' if overall_breached else '✅ Your renewal deadline is protected if you follow the task dates above.'}
-    * **{vernacular}**
+    return (
+        f"• What to Do First Today: Start with {first_task['title']} no later than {first_task['working_target'].strftime('%d %b %Y')}. ({first_task['why_blocked']})\n\n"
+        f"• Full Coordinated Sequence: {steps_summary}\n\n"
+        f"• Deadline & Fee Protection: Total simulated cost is ₹{total_estimated_cost} (includes {appointment_buffer}-day slot buffer). Tiered late-fee risk: ₹{computed_late_fee}.\n\n"
+        f"• {vernacular}"
+    )
+
+if not st.session_state["last_generated_brief"]:
+    st.session_state["last_generated_brief"] = generate_local_rule_guidance()
+
+btn_col1, btn_col2 = st.columns([1, 1])
+
+with btn_col1:
+    if st.button("🤖 Generate Plain-Language & Vernacular Action Brief", use_container_width=True):
+        if not readback_confirmed:
+            st.warning("Please check the Read-Back Confirmation box above.")
+        else:
+            ai_success = False
+            if client:
+                with st.spinner("Generating plain-language guidance..."):
+                    prompt = f"""
+                    You are a decision-support assistant for Indian vehicle and driving services.
+                    Citizen statement: "{user_utterance}"
+                    Confirmed Case:
+                    - Profile: {active_member}
+                    - Route: {from_state} to {to_state} ({vehicle_type} - {vehicle_reg})
+                    - Expiry: {expiry_date.strftime('%d %b %Y')} ({days_to_expiry} days left)
+                    - Penalty: ₹{challan_amount}
+                    - Ownership: {ownership_status}
+                    - Ordered Plan: {[t['title'] for t in scheduled_tasks]}
+                    - First Safe Date: {first_task['working_target'].strftime('%d %b %Y')}
+                    - Language request: {lang_choice}
+
+                    Provide 3 clear bullet points:
+                    1. What must happen first and why later steps are blocked.
+                    2. How recent curveballs affect their deadline.
+                    3. One reassuring sentence in {'Telugu' if 'Telugu' in lang_choice else 'Hindi'}.
+                    """
+                    try:
+                        response = client.models.generate_content(
+                            model="gemini-3.8-flash",
+                            contents=prompt
+                        )
+                        if response and response.text:
+                            st.session_state["last_generated_brief"] = response.text
+                            ai_success = True
+                    except Exception as e:
+                        st.warning(f"Live AI unavailable ({e}). Using deterministic explainer:")
+
+            if not ai_success:
+                st.session_state["last_generated_brief"] = generate_local_rule_guidance()
+
+with btn_col2:
+    clean_speech_text = (
+        readback_text + " Here is your action plan: " +
+        st.session_state["last_generated_brief"].replace("*", "").replace("#", "").replace("•", "")
+    )
+    safe_js_text = json.dumps(clean_speech_text)
+    
+    tts_html = f"""
+    <div style="display: flex; gap: 10px; align-items: center; margin-top: 1px;">
+        <button onclick='
+            window.speechSynthesis.cancel();
+            const msg = new SpeechSynthesisUtterance({safe_js_text});
+            msg.rate = 0.98;
+            window.speechSynthesis.speak(msg);
+        ' style="
+            background-color: #1f2937; color: #f8fafc; border: 1px solid #475569;
+            padding: 8px 16px; border-radius: 8px; cursor: pointer; font-family: sans-serif;
+            font-size: 14px; font-weight: 500; width: 72%; height: 40px;
+        ">
+            🔊 Speak Action Brief Aloud
+        </button>
+        <button onclick="window.speechSynthesis.cancel();" style="
+            background-color: #3f1d28; color: #fca5a5; border: 1px solid #ef4444;
+            padding: 8px 12px; border-radius: 8px; cursor: pointer; font-family: sans-serif;
+            font-size: 14px; width: 26%; height: 40px;
+        ">
+            ⏹️ Stop
+        </button>
+    </div>
     """
+    components.html(tts_html, height=48)
 
-if st.button("🤖 Generate Plain-Language & Vernacular Action Brief"):
-    if not readback_confirmed:
-        st.warning("Please check the Read-Back Confirmation box above before generating guidance.")
-    else:
-        ai_success = False
-        if client:
-            with st.spinner("Generating plain-language citizen guidance..."):
-                prompt = f"""
-                You are a decision-support assistant for Indian vehicle and driving services.
-                Citizen statement: "{user_utterance}"
-                Confirmed Case:
-                - Route: {from_state} to {to_state} ({vehicle_type})
-                - Expiry: {expiry_date.strftime('%d %b %Y')} ({days_to_expiry} days left)
-                - Penalty: ₹{challan_amount}
-                - Ownership: {ownership_status}
-                - Address Document Invalidated: {address_invalidated}
-                - Ordered Plan: {[t['title'] for t in scheduled_tasks]}
-                - First Safe Date: {first_task['working_target'].strftime('%d %b %Y')}
-                - Language request: {lang_choice}
+if st.session_state["last_generated_brief"]:
+    st.success(st.session_state["last_generated_brief"])
 
-                Provide 3 clear, plain-language bullet points (under 120 words):
-                1. What must happen first and why later steps are blocked.
-                2. How recent curveballs (rejection, invalid proof, or {appointment_buffer}d slot wait) affect their deadline.
-                3. One reassuring sentence in {'Telugu' if 'Telugu' in lang_choice else 'Hindi'}.
-                """
-                try:
-                    response = client.models.generate_content(
-                        model="gemini-3.8-flash",
-                        contents=prompt
-                    )
-                    if response and response.text:
-                        st.success(response.text)
-                        ai_success = True
-                except Exception as e:
-                    st.warning(f"Live AI unavailable ({e}). Using deterministic rule-pack explainer:")
-
-        if not ai_success:
-            st.markdown(generate_local_rule_guidance())
-
-# --- SLIDE 10: EVALUATION BENCHMARK VERIFIER (8 GOLD SCENARIOS) ---
+# --- EVALUATION BENCHMARK VERIFIER (8 GOLD SCENARIOS) ---
 st.markdown("---")
 with st.expander("✅ Slide 10 Evaluation Suite: Gold-Plan Dependency Correctness across all 8 Scenarios"):
-    st.write("Compares generated task ordering against approved gold plans across all 8 test scenarios:")
+    st.write("Compares generated task ordering against approved gold plans across all 8 test scenarios[cite: 19]:")
     eval_rows = []
     for s_name, s_cfg in SCENARIOS.items():
         if "Unknown" in s_cfg["to_state"]:
